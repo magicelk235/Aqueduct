@@ -1,13 +1,13 @@
 {
-  "name": "@magicelk235/viaduct",
-  "version": "1.18.0",
+  "name": "@magicelk235/aqueduct",
+  "version": "1.18.1",
   "publishConfig": {
     "access": "public"
   },
-  "description": "Convert a Chrome extension into a Safari Web Extension (macOS/iOS) ready for local dev or CI/CD.",
+  "description": "Safari engine of viaduct: convert a Chrome extension into a Safari Web Extension (macOS/iOS) ready for local dev or CI/CD.",
   "type": "module",
   "bin": {
-    "viaduct": "dist/cli.js"
+    "aqueduct": "dist/cli.js"
   },
   "files": [
     "dist",
@@ -36,12 +36,12 @@
   "author": "magicelk235",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/magicelk235/Viaduct-CLI.git"
+    "url": "git+https://github.com/magicelk235/Aqueduct.git"
   },
   "bugs": {
-    "url": "https://github.com/magicelk235/Viaduct-CLI/issues"
+    "url": "https://github.com/magicelk235/Aqueduct/issues"
   },
-  "homepage": "https://github.com/magicelk235/Viaduct-CLI#readme",
+  "homepage": "https://github.com/magicelk235/Aqueduct#readme",
   "os": [
     "darwin"
   ],

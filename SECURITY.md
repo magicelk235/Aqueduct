@@ -18,9 +18,9 @@ Please do not open a public GitHub issue for security vulnerabilities.
 Report privately through one of:
 
 - GitHub Security Advisories: open a draft advisory at
-  <https://github.com/magicelk235/Viaduct-CLI/security/advisories/new>
+  <https://github.com/magicelk235/Aqueduct/security/advisories/new>
   (preferred).
-- Email: yehonatan.2350@gmail.com with the subject line `SECURITY: viaduct-cli`.
+- Email: yehonatan.2350@gmail.com with the subject line `SECURITY: aqueduct`.
 
 Please include:
 

@@ -50,4 +50,4 @@ above.
 ## Contact
 
 Questions? Email support@magicelklabs.com, or open an issue at
-<https://github.com/magicelk235/Viaduct-CLI/issues>.
+<https://github.com/magicelk235/Aqueduct/issues>.

@@ -36,7 +36,7 @@
  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓                            ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ 
 ```
 
-# Viaduct
+# Aqueduct
 
 </div>
 
@@ -46,6 +46,13 @@ manifest, injects a runtime shim for the `chrome.*` APIs Safari does not
 implement, then runs Apple's `safari-web-extension-packager` and `xcodebuild` to
 produce a signed app. The result can be loaded straight into Safari for
 development or built through Xcode for TestFlight.
+
+Aqueduct is the Safari engine of [viaduct](https://github.com/magicelk235/Viaduct-CLI),
+which converts for Safari and Firefox. Most people want
+`npm install -g @magicelk235/viaduct`; it runs Aqueduct when you convert for
+Safari. Aqueduct on its own takes the same inputs and flags. Its help text and
+progress lines say `viaduct`, because that's the command most people run it
+through.
 
 Viaduct is also a Mac app that does this without a terminal:
 [magicelklabs.com/viaduct](https://magicelklabs.com/viaduct/).
@@ -184,17 +191,17 @@ popup, options, side panel. It:
 You can check the toolchain at any time:
 
 ```
-viaduct --doctor
+aqueduct --doctor
 ```
 
 ## Install
 
 ```
-npm install -g @magicelk235/viaduct
-viaduct <input> [options]
+npm install -g @magicelk235/aqueduct
+aqueduct <input> [options]
 ```
 
-The command is `viaduct`. It is macOS only, because it needs Xcode. See
+The command is `aqueduct`. It is macOS only, because it needs Xcode. See
 Requirements above.
 
 ## Build from source
@@ -216,7 +223,7 @@ Or link it as a global command:
 
 ```
 npm link
-viaduct <input> [options]
+aqueduct <input> [options]
 ```
 
 ## Usage
@@ -224,19 +231,19 @@ viaduct <input> [options]
 Convert straight from a Chrome Web Store link and let viaduct download the CRX:
 
 ```
-viaduct "https://chromewebstore.google.com/detail/ublock-origin/cjpalhdlnbpafiamejdnhcphjbkeiagm"
+aqueduct "https://chromewebstore.google.com/detail/ublock-origin/cjpalhdlnbpafiamejdnhcphjbkeiagm"
 ```
 
 A direct `.crx` or `.zip` URL works the same way:
 
 ```
-viaduct "https://example.com/my-extension.crx"
+aqueduct "https://example.com/my-extension.crx"
 ```
 
 Analyze an extension and report the issues without converting it:
 
 ```
-viaduct ./my-extension.zip --analyze
+aqueduct ./my-extension.zip --analyze
 ```
 
 Issues are tagged so you can tell what needs your attention from what the
@@ -252,7 +259,7 @@ Stage for Safari 18's "Add Temporary Extension", which skips Xcode entirely and
 is the fastest way to iterate:
 
 ```
-viaduct ./my-extension.zip --temp-load
+aqueduct ./my-extension.zip --temp-load
 ```
 
 Then, in Safari: under Settings, Advanced, turn on "Show features for web
@@ -263,14 +270,14 @@ folder. Temporary extensions have to be re-added every time Safari restarts.
 Generate an Xcode project without building it:
 
 ```
-viaduct ./my-extension.zip --no-build
+aqueduct ./my-extension.zip --no-build
 ```
 
 Full conversion with an ad-hoc build, using a clean copy that is safe for CI and
 TestFlight:
 
 ```
-viaduct ./my-extension.zip --ci
+aqueduct ./my-extension.zip --ci
 ```
 
 Without `--ci`, resources are symlinked instead, so your edits show up live
@@ -279,7 +286,7 @@ during development. Use `--ci` to clean-copy them into the project.
 Convert several extensions in one go:
 
 ```
-viaduct ./one.zip ./two.crx ./unpacked-dir
+aqueduct ./one.zip ./two.crx ./unpacked-dir
 ```
 
 Batch runs give each extension its own default `./<App>_Safari` output, so
@@ -355,7 +362,7 @@ leaving no duplicate behind, registers it with LaunchServices, and launches it
 once so Safari picks up the extension:
 
 ```
-viaduct ./my-extension.zip --install
+aqueduct ./my-extension.zip --install
 ```
 
 Then enable the extension in Safari, under Settings, Extensions.
@@ -364,8 +371,8 @@ To remove an app you installed earlier, which unregisters it from LaunchServices
 and deletes it from the install directory:
 
 ```
-viaduct --uninstall <AppName>                       # ~/Applications
-viaduct --uninstall <AppName> --install-dir <dir>   # custom directory
+aqueduct --uninstall <AppName>                       # ~/Applications
+aqueduct --uninstall <AppName> --install-dir <dir>   # custom directory
 ```
 
 ### Persisting across Safari restarts (team signing)
@@ -384,9 +391,9 @@ the extension without the unsigned toggle and it survives quitting Safari.
 Xcode so you never have to know or type it:
 
 ```
-viaduct ./my-extension.zip --install            # auto-detects the team
-viaduct ./my-extension.zip --install --team auto # same, explicit
-viaduct ./my-extension.zip --install --team V8K8L3ZSD5  # exact id
+aqueduct ./my-extension.zip --install            # auto-detects the team
+aqueduct ./my-extension.zip --install --team auto # same, explicit
+aqueduct ./my-extension.zip --install --team V8K8L3ZSD5  # exact id
 ```
 
 Auto-detection reads the team Xcode cached (`IDEProvisioningTeamByIdentifier` or
