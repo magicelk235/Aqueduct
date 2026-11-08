@@ -440,7 +440,7 @@ others were verified in an earlier round and are due a re-check. The wiki keeps
 the full list, including what was actually exercised in Safari and what is still
 untested: [Tested Extensions][tested].
 
-[tested]: https://github.com/magicelk235/Viaduct-CLI/wiki/Tested-Extensions
+[tested]: https://github.com/magicelk235/Aqueduct/wiki/Tested-Extensions
 
 ## Limitations
 
