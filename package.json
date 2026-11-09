@@ -1,6 +1,6 @@
 {
   "name": "@magicelk235/aqueduct",
-  "version": "1.18.1",
+  "version": "1.18.2",
   "publishConfig": {
     "access": "public"
   },
