@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import vm from "node:vm";
 import { wireActionClickBridge } from "../dist/runtime/shim.js";
 
 function stage(files) {
@@ -122,6 +123,40 @@ test("setPopup opt-out survives a shim script (onClicked+action, no setPopup) li
   try {
     assert.equal(wireActionClickBridge(dir, manifest), false);
     assert.equal(manifest.browser_action.default_popup, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the bridge popup keeps closing its popover until Safari stops ignoring the close", () => {
+  // Safari drops window.close() while it is still presenting the popover, and an awake
+  // background answers getBackgroundPage at once, so a single early close leaves an empty
+  // popover on screen (live: Glide, a gray teardrop under the toolbar button).
+  const dir = stage({ "bg.js": "chrome.action.onClicked.addListener(t => chrome.scripting.executeScript({ target: { tabId: t.id }, files: ['c.js'] }));" });
+  const manifest = { manifest_version: 3, action: {}, background: { service_worker: "bg.js" } };
+  try {
+    assert.equal(wireActionClickBridge(dir, manifest), true);
+    const js = readFileSync(join(dir, "__viaduct-action.js"), "utf-8");
+
+    let now = 0;
+    const timers = [];
+    let fired = 0;
+    let closedAt = null;
+    const bg = { __viaductFireClick() { fired++; } };
+    const ctx = {
+      setTimeout(fn, ms) { timers.push({ at: now + (ms || 0), fn }); return timers.length; },
+      chrome: { runtime: { getBackgroundPage(cb) { cb(bg); } } },
+      window: { close() { if (closedAt === null && now >= 300) closedAt = now; } },
+    };
+    vm.runInNewContext(js, ctx);
+    while (closedAt === null && timers.length) {
+      timers.sort((a, b) => a.at - b.at);
+      const t = timers.shift();
+      now = t.at;
+      t.fn();
+    }
+    assert.equal(fired, 1);
+    assert.ok(closedAt !== null && closedAt < 1000, `popover closed at ${closedAt}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

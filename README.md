@@ -128,7 +128,7 @@ no popover at all. The shortcut reuses a declared `commands` key when there is
 one, since Safari cannot fire `onCommand` and that key is otherwise dead weight
 (the inert command is removed), and falls back to `Ctrl+Shift+Y`. When this path
 is wired the toolbar button is deliberately left inert, because giving it a popup
-would summon Safari's un-closable popover. It needs two things: a statically
+would flash Safari's popover on every click. It needs two things: a statically
 determinable message, and an extension that has content scripts.
 
 The second path is a synthetic popup, used only when the hotkey cannot be wired.
@@ -138,9 +138,9 @@ suspended Safari background (`runtime.sendMessage` does not), then replays the
 captured `onClicked` listeners inside the background realm so their
 `tabs.sendMessage` actually reaches the content script, deduped down to a single
 toggle. This path carries a Safari limitation you will see: a toolbar popup
-always draws a popover that script cannot close, since `window.close`, `blur`,
-and refocus are all ignored, so a popover flashes up and goes away on your next
-interaction.
+always draws a popover, so one flashes up on every click. The popup closes it
+once the click is replayed, retrying because Safari ignores a `window.close()`
+made while the popover is still opening.
 
 ### Runtime shim
 

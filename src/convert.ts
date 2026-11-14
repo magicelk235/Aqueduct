@@ -290,11 +290,11 @@ export function convert(opts: ConvertOptions): ConvertResult {
     }
 
     // Prefer the popover-free in-page hotkey. Only fall back to the synthetic popup (which
-    // makes the toolbar button work but forces Safari's un-closable popover) when the
+    // makes the toolbar button work but flashes Safari's popover on every click) when the
     // hotkey can't be wired.
     const hotkey = wireActionHotkey(stageDir, transformed);
     if (hotkey) {
-      ok(`Action hotkey: ${hotkey} toggles the extension in-page. The toolbar button stays inert on purpose, to avoid Safari's un-closable popover.`);
+      ok(`Action hotkey: ${hotkey} toggles the extension in-page. The toolbar button stays inert on purpose, to avoid Safari's popover.`);
     } else if (wireActionClickBridge(stageDir, transformed)) {
       ok("Action-click bridge: synthetic popup replays action.onClicked (Safari won't fire it on the toolbar button; shows a brief popover)");
     }

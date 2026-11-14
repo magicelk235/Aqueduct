@@ -4456,9 +4456,9 @@ var __C2S_DEBUG__ = false;
           getActive(function (tab) {
             if (!tab) return;
             for (var i = 0; i < __vClickStore.length; i++) { try { __vClickStore[i](tab); } catch (e) {} }
-            // Note: Safari will not let script close this popup's popover (window.close/
-            // blur and focus moves are all ignored) — it dismisses on the user's next
-            // interaction. The popover-free path is the in-page hotkey (wireActionHotkey).
+            // The popup closes its own popover once this returns (it retries, because
+            // Safari ignores a close while the popover is still opening). The popover-free
+            // path is the in-page hotkey (wireActionHotkey).
           });
         };
       };
@@ -4503,8 +4503,8 @@ var __C2S_DEBUG__ = false;
     } catch (e) {}
 
     // Content-script: capture the page's runtime.onMessage listeners into a shared array.
-    // Safari never fires action.onClicked and always shows an un-closable popover for a
-    // toolbar popup, so the only popover-free way to trigger an in-page toggle is a
+    // Safari never fires action.onClicked and draws a popover for any toolbar popup, so
+    // the only popover-free way to trigger an in-page toggle is a
     // page-level keydown that replays the extension's own message to these listeners. The
     // generated __viaduct-hotkey.js (present only when viaduct could determine the action
     // message) does that. The shim runs before the bundle's content script, so its

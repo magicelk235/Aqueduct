@@ -727,11 +727,20 @@ export function wireActionClickBridge(dir: string, manifest: Manifest): boolean 
   // replays the real onClicked listeners with the active tab, in the background realm.
   // (runtime.sendMessage does NOT wake a suspended Safari background, so it can't be used
   // here.) Retry until the call lands (covers wake latency); the background dedups on the
-  // id, so retries fire exactly one toggle. Safari won't let us close the popover (blur/
-  // close are ignored); it dismisses on the next interaction. The hotkey path avoids it.
+  // id, so retries fire exactly one toggle. Safari ignores window.close() while it is
+  // still presenting the popover (a close in the first ~150ms is dropped), and an awake
+  // background answers within a millisecond, so keep asking until the popover is gone.
   var id = String(Date.now()) + ":" + Math.random().toString(36).slice(2);
   var done = false, tries = 0;
-  function finish() { if (done) return; done = true; try { window.blur(); } catch (e) {} try { window.close(); } catch (e) {} }
+  function finish() {
+    if (done) return;
+    done = true;
+    var closes = 0;
+    (function close() {
+      try { window.close(); } catch (e) {}
+      if (++closes < 100) setTimeout(close, 100);
+    })();
+  }
   function hit(bg) {
     if (done || !bg || typeof bg.__viaductFireClick !== "function") return false;
     try { bg.__viaductFireClick(id); } catch (e) {}
@@ -865,7 +874,7 @@ export function wireActionHotkey(dir: string, manifest: Manifest): string | null
   self.__viaductHotkeyBound = true;
   var COMBO = ${JSON.stringify(combo)};
   // Safari never fires action.onClicked/commands.onCommand for a converted extension, and
-  // always shows an un-closable popover for a toolbar popup. This page-level keydown is the
+  // draws a popover for any toolbar popup. This page-level keydown is the
   // popover-free path: replay the action's own message to the runtime.onMessage listeners
   // the compat shim captured (self.__viaductMsgListeners), reproducing the onClicked toggle.
   window.addEventListener("keydown", function (e) {
