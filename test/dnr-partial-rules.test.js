@@ -66,12 +66,25 @@ const rule = (id, regexFilter) => ({
 
 test("one unsupported regexFilter does not take the whole batch down", async () => {
   const s = boot();
+  // A lookahead has no Safari form, so the shim can't lower this one and Safari refuses it.
   await s.chrome.declarativeNetRequest.updateSessionRules({
     removeRuleIds: [7],
-    addRules: [rule(1, "^https://a\\.example/"), rule(2, "^(?:https?|ftp)://.*\\.user\\.js$"), rule(3, "^https://b\\.example/")],
+    addRules: [rule(1, "^https://a\\.example/"), rule(2, "^(?:https?|ftp)://(?!x).*\\.user\\.js$"), rule(3, "^https://b\\.example/")],
   });
   assert.deepEqual(s.applied.map((r) => r.id), [1, 3], "the compilable rules must survive");
   assert.deepEqual(s.removed, [7], "removals must still be applied");
+});
+
+test("Tampermonkey's alternation regex is lowered into rules Safari takes, not lost", async () => {
+  const s = boot();
+  await s.chrome.declarativeNetRequest.updateSessionRules({
+    addRules: [rule(1, "^https://a\\.example/"), rule(2, "^(?:https?|ftp)://.*\\.user\\.js$")],
+  });
+  const tm = s.applied.filter((r) => r.id !== 1);
+  assert.deepEqual(tm.map((r) => r.condition.regexFilter), ["^https?://.*\\.user\\.js$", "^ftp://.*\\.user\\.js$"]);
+  assert.equal(tm[0].id, 2, "the first branch keeps the extension's id");
+  assert.ok(tm[1].id >= 1900000000, "the split-off branch takes an id from the reserved range");
+  assert.equal(tm[1].action.redirect.regexSubstitution, "https://x/#url=\\0", "\\0 (whole match) is unchanged");
 });
 
 test("a batch Safari accepts outright is applied in one call, untouched", async () => {

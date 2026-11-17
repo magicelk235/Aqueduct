@@ -995,16 +995,20 @@ export function transformManifest(
   if (Array.isArray(out.optional_permissions)) {
     out.optional_permissions = out.optional_permissions.filter((p) => !removeSet.has(p) && !isUngrantablePattern(p));
   }
-  // Safari rejects the declarativeNetRequestWithHostAccess token, but either token
-  // grants the DNR API. Re-add plain declarativeNetRequest to whichever list the
-  // variant was declared in (a variant declared ONLY in optional_permissions must
-  // not silently lose the DNR capability), unless it's already present.
-  if (removeSet.has("declarativeNetRequestWithHostAccess")) {
-    const inRequired = Array.isArray(m.permissions) && m.permissions.includes("declarativeNetRequestWithHostAccess");
-    const key = inRequired ? "permissions" : "optional_permissions";
-    if (!Array.isArray(out[key])) out[key] = [];
-    const list = out[key] as string[];
-    if (!list.includes("declarativeNetRequest")) list.push("declarativeNetRequest");
+  // Declare BOTH DNR tokens wherever either one is declared. Either grants the API
+  // and block/allow rules, but WebKit activates redirect and modifyHeaders actions
+  // only for an extension holding declarativeNetRequestWithHostAccess
+  // (WebExtensionController::updateWebsitePoliciesForNavigation skips everyone
+  // else), and then only on hosts in its granted host permissions. Chrome
+  // extensions very often declare just the plain token, which in Safari leaves
+  // their header and redirect rules accepted, listed back, and never applied.
+  // The plain token is kept too, for Safari releases that predate the variant.
+  // Same list as declared, so an optional-only DNR permission stays optional.
+  const DNR_TOKENS = ["declarativeNetRequest", "declarativeNetRequestWithHostAccess"];
+  for (const key of ["permissions", "optional_permissions"] as const) {
+    const list = out[key];
+    if (!Array.isArray(list) || !list.some((p) => DNR_TOKENS.includes(p as string))) continue;
+    for (const t of DNR_TOKENS) if (!list.includes(t)) (list as string[]).push(t);
   }
   if (Array.isArray(out.optional_permissions) && out.optional_permissions.length === 0) delete out.optional_permissions;
 

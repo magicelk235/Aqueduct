@@ -468,17 +468,28 @@ untested: [Tested Extensions][tested].
   host manifest or host binary in Safari; messages route to the containing macOS
   app instead. The analyzer flags it, and you implement the response in the app's
   `SafariWebExtensionHandler` (`beginRequest`).
-- `declarativeNetRequest` `modifyHeaders` rules are dropped, from static rulesets
-  and from dynamic `updateSessionRules`/`updateDynamicRules` calls alike. Safari
-  accepts such a rule and then never applies it (verified against a live server,
-  with a `block` rule in the same call blocking correctly), and one header name off
-  WebKit's allowlist makes the whole update throw and takes the working rules with
-  it. Spoofing `user-agent`/`referer`, stripping `Cookie`, a CORS bypass or a
-  response-header rewrite all need a native-messaging proxy instead.
-  The tool also warns when static rulesets use `regexFilter`, since Safari
-  supports only a limited regex subset and silently drops rules it cannot
-  compile, and when the number of enabled rules exceeds what Safari honors, since
-  the overflow is ignored.
+- `declarativeNetRequest` `redirect` and `modifyHeaders` actions only run in
+  Safari for an extension holding `declarativeNetRequestWithHostAccess`, and only
+  on hosts the user has granted it (from the next page load after granting). The
+  converter declares that permission next to `declarativeNetRequest`, and warns
+  when header or redirect rules have no host permission to act on.
+- `modifyHeaders` rules keep every header operation Safari accepts. Safari refuses
+  some operations: a header name off WebCore's known list (on current releases),
+  setting a request header the network stack owns (`Host`, `Proxy-*`, ...), and
+  `append` on a header with no delimiter. One refused operation fails the whole
+  rule, or the whole update call, so the converter (static rulesets) and the shim
+  (dynamic and session rules) drop just those operations. Header rules still don't
+  reach the extension's own `fetch`/XHR in Safari, so the shim applies them there
+  itself. Response-header rewrites may not apply (WebKit bug 263818).
+- `regexFilter` patterns are rewritten into the regex subset Safari compiles:
+  `\d`, `\w` and `\s` become explicit classes, `{n,m}` is unrolled, single-character
+  alternation becomes a class, other alternation splits the rule into one rule per
+  branch, and a leading `(?i)` becomes the case-insensitive flag. Split dynamic and
+  session rules are hidden behind the original id for `get*Rules` and
+  `removeRuleIds`. `isRegexSupported` answers for the rewritten form. Lookarounds,
+  backreferences, `\b` and repeated alternation have no Safari form; those rules are
+  reported by id. The tool also warns when the number of enabled rules exceeds what
+  Safari honors, since the overflow is ignored.
 
 ## License
 

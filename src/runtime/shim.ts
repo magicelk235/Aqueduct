@@ -26,6 +26,8 @@ export const CDP_KEEPALIVE_FILENAME = "viaduct-cdp-keepalive.js";
 // __C2S_DEBUG__ gate, and the token-gated RPC bridge that lets a page drive the
 // extension headlessly (see debug-rpc.js).
 export const DEBUG_RING_FILENAME = "debug-ring.js";
+/** Safari DNR rule fixes (header validation, regexFilter lowering), spliced into the shim. */
+export const DNR_SAFARI_FILENAME = "dnr-safari.js";
 export const DEBUG_RPC_FILENAME = "debug-rpc.js";
 /** Where convert() leaves a --debug build's RPC token: next to CONVERSION_REPORT.md. */
 export const DEBUG_RPC_TOKEN_FILENAME = "debug-rpc.token";
@@ -122,6 +124,9 @@ export function shimSource(config: ShimConfig = {}): string {
     swFetch: config.backgroundHandlesFetch === true,
   }).replace(/[\u2028\u2029]/g, (c) => c === "\u2028" ? "\\u2028" : "\\u2029");
   let runtime = readFileSync(join(RUNTIME_DIR, SHIM_FILENAME), "utf-8");
+  // The DNR rule fixes are shared with the build-time ruleset transform (dnr.ts),
+  // so they live in their own file; splice them over their marker line.
+  runtime = runtime.split("// __C2S_DNR_SAFARI__").join(readFileSync(join(RUNTIME_DIR, DNR_SAFARI_FILENAME), "utf-8"));
   // --debug emit: flip the compiled-in trace gate and splice the ring-buffer
   // logger over its marker line. Exact-string split/join, same style as the
   // proxy-config token below — a release emit never sees the ring source, so no

@@ -6712,18 +6712,23 @@ var __C2S_DEBUG__ = false;
     }
   } catch (__namespaceBackfillErr) { dbg("[c2s] namespace backfills stopped early: " + String((__namespaceBackfillErr && __namespaceBackfillErr.stack) || __namespaceBackfillErr)); }
 
+  // Header validation and regexFilter lowering, shared with the build-time ruleset
+  // transform (src/runtime/dnr-safari.js, spliced in here). Defines c2sDnrSafari.
+  // __C2S_DNR_SAFARI__
+
   // ── DNR header rules, applied to the extension's OWN requests ──────────────
-  // Safari never applies a modifyHeaders rule (measured, see below), so the wrap
-  // under this strips them before they can take a whole batch down. The rules are
-  // not thrown away, though: an extension commonly uses them to stamp headers on
-  // its own API calls (Claude in Chrome sets User-Agent, anthropic-client-platform
+  // Safari applies a modifyHeaders rule natively once the extension holds
+  // declarativeNetRequestWithHostAccess (the converter declares it) and host access
+  // to the target, but not to the extension's own fetch/XHR (WebKit bug: header
+  // rules are ignored for requests an extension page makes), and Safari refuses some
+  // header names outright. An extension commonly uses these rules to stamp headers
+  // on its own API calls (Claude in Chrome sets User-Agent, anthropic-client-platform
   // and anthropic-client-version on every api.anthropic.com request), and those
-  // requests all pass through the shim's fetch/XHR patches, which can honor the
-  // rule themselves. Settable headers are applied in the browser; forbidden ones
-  // (User-Agent, Origin, Referer, ...) ride along to the native-host proxy retry,
-  // which sets anything. Page subresources and WebSockets are out of reach and
-  // stay unmodified. The registry is mirrored into storage.local because the
-  // background registers the rules and a panel makes the calls.
+  // requests all pass through the shim's fetch/XHR patches, which honor the full
+  // original rule themselves. Settable headers are applied in the browser; forbidden
+  // ones (User-Agent, Origin, Referer, ...) ride along to the native-host proxy
+  // retry, which sets anything. The registry is mirrored into storage.local because
+  // the background registers the rules and a panel makes the calls.
   var dnrHeaderRules = Object.create(null); // id -> rule
   var DNR_HDR_KEY = "__c2sDnrHeaderRules";
   var FORBIDDEN_HDR = /^(accept-charset|accept-encoding|access-control-request-headers|access-control-request-method|connection|content-length|cookie|cookie2|date|dnt|expect|host|keep-alive|origin|referer|set-cookie|te|trailer|transfer-encoding|upgrade|via|user-agent|proxy-.*|sec-.*)$/i;
@@ -6823,18 +6828,22 @@ var __C2S_DEBUG__ = false;
     }
   } catch (e) {}
 
-  // Safari ACCEPTS a declarativeNetRequest modifyHeaders rule and then never acts on
-  // it. Measured on Safari 26.6.2 with a converted extension holding all-website
-  // access: update{Session,Dynamic}Rules resolves, get{Session,Dynamic}Rules lists the
-  // rule back verbatim, and every request still carries Safari's own User-Agent and
-  // Referer — main-frame navigation, page XHR and subresources alike. A `block` rule
-  // registered in the SAME call did block, so the rule list is compiled and live; the
-  // header action specifically is inert (and responseHeaders are not implemented at
-  // all, WebKit bug 263818). On top of that, a header name off WebKit's allowlist
-  // (x-forwarded-for, any custom x-*) makes the call throw SYNCHRONOUSLY, which aborts
-  // the extension's own registration code and costs it every other rule in the batch.
-  // So drop these rules: they cannot work, and they can take working rules down with
-  // them. block/redirect/allow rules pass through untouched.
+  // Rules reach Safari's own DNR after three Safari-specific fixes:
+  //   - modifyHeaders: Safari refuses a header operation it can't perform (a name
+  //     off WebCore's known list on shipping releases, a request header the network
+  //     stack owns, append without a delimiter) by THROWING out of the update call,
+  //     which aborts the extension's registration code and costs it every other rule
+  //     in the batch. Drop just those operations, keep the rest of the rule.
+  //     Header names are checked loosely first (any HTTP token, as WebKit main
+  //     accepts) and strictly once Safari refuses a name.
+  //   - resource types Safari refuses (below).
+  //   - regexFilter: rewritten into the regex subset Safari's content-rule-list
+  //     compiler takes; alternation splits a rule into one per branch, under ids
+  //     the extension never sees (get*Rules hands back the rules as registered).
+  // Earlier converter releases stripped every modifyHeaders rule here: Safari
+  // accepted and never applied them (measured on Safari 26.6.2), which was the
+  // missing declarativeNetRequestWithHostAccess permission, now declared.
+  var dnrStrictHeaderNames = false;
   if (hasChrome && chrome.declarativeNetRequest) {
     var dnrNs = mutableNamespace(chrome, "declarativeNetRequest") || chrome.declarativeNetRequest;
     // Chrome exposes string-enum objects + onRuleMatchedDebug on the DNR namespace
@@ -6851,14 +6860,19 @@ var __C2S_DEBUG__ = false;
     };
     for (var dk in dnrEnums) { if (!dnrNs[dk]) { try { dnrNs[dk] = dnrEnums[dk]; } catch (e) {} } }
     if (!dnrNs.onRuleMatchedDebug) { try { dnrNs.onRuleMatchedDebug = event(); } catch (e) {} }
-    var stripModifyHeaders = function (opts) {
+    var sanitizeHeaders = function (opts) {
       if (!opts || !Array.isArray(opts.addRules)) return opts;
-      var safe = opts.addRules.filter(function (r) {
-        return !(r && r.action && r.action.type === "modifyHeaders");
+      var changed = false, out = [], ops = 0, rulesGone = 0;
+      opts.addRules.forEach(function (r) {
+        var res = c2sDnrSafari.sanitizeHeaderRule(r, dnrStrictHeaderNames);
+        if (res.rule !== r) changed = true;
+        ops += res.dropped.length;
+        if (DBG) res.dropped.forEach(function (d) { dbg("[c2s] DNR header op dropped (rule " + (r && r.id) + "): " + d.why); });
+        if (res.rule) out.push(res.rule); else rulesGone++;
       });
-      if (safe.length === opts.addRules.length) return opts;
-      dbg("[c2s] DNR strip: " + (opts.addRules.length - safe.length) + " modifyHeaders rule(s) of " + opts.addRules.length + " (Safari never applies them)");
-      return Object.assign({}, opts, { addRules: safe });
+      if (!changed) return opts;
+      dbg("[c2s] DNR headers: dropped " + ops + " header op(s) Safari refuses; " + rulesGone + " rule(s) had none left");
+      return Object.assign({}, opts, { addRules: out });
     };
     // Safari refuses four of Chrome's resource types outright: submitting one rule per
     // type on Safari Technology Preview, `object`, `csp_report`, `webtransport` and
@@ -6899,6 +6913,184 @@ var __C2S_DEBUG__ = false;
       dbg("[c2s] DNR types: " + changed + " rule(s) named a resource type Safari refuses; " + dropped + " had no other type and were dropped");
       return Object.assign({}, opts, { addRules: out });
     };
+    // regexFilter lowering. A rule Safari's regex subset can't take is rewritten
+    // (c2sDnrSafari.lowerRule); alternation splits it into one rule per branch, the
+    // first keeping the extension's id and the rest taking ids from a high range.
+    // Per store, remember each rewritten rule as the extension registered it plus
+    // its extra ids, so removeRuleIds reaches the extras and get*Rules hands back
+    // the original rules. Session bookkeeping lives in storage.session so it ends
+    // with the session, like the rules themselves.
+    var DNR_RW_KEY = "__c2sDnrRewritten";
+    var DNR_EXTRA_BASE = 1900000000;
+    var dnrRewritten = { session: Object.create(null), dynamic: Object.create(null) };
+    var dnrRwArea = function (store) {
+      try { return store === "session" ? (api.storage && api.storage.session) : (api.storage && api.storage.local); } catch (e) { return null; }
+    };
+    var dnrRwLoad = function (store) {
+      return new Promise(function (resolve) {
+        var area = dnrRwArea(store);
+        if (!area) return resolve();
+        var done = false;
+        var fin = function (res) {
+          if (done) return; done = true;
+          var stored = res && res[DNR_RW_KEY];
+          // Entries written in this context before the load finished win.
+          if (stored && typeof stored === "object") for (var id in stored) { if (!dnrRewritten[store][id]) dnrRewritten[store][id] = stored[id]; }
+          resolve();
+        };
+        try {
+          var p = area.get(DNR_RW_KEY, function (res) { try { void (api.runtime && api.runtime.lastError); } catch (e) {} fin(res); });
+          if (p && typeof p.then === "function") p.then(fin, function () { fin(null); });
+        } catch (e) { fin(null); }
+      });
+    };
+    var dnrRwReady = Promise.all([dnrRwLoad("session"), dnrRwLoad("dynamic")]);
+    var dnrRwSave = function (store) {
+      dnrRwReady.then(function () {
+        var area = dnrRwArea(store);
+        if (!area) return;
+        try {
+          var obj = {}; obj[DNR_RW_KEY] = dnrRewritten[store];
+          var p = area.set(obj, function () { try { void (api.runtime && api.runtime.lastError); } catch (e) {} });
+          if (p && typeof p.catch === "function") p.catch(function () {});
+        } catch (e) {}
+      });
+    };
+    try {
+      if (api.storage && api.storage.onChanged && api.storage.onChanged.addListener) {
+        api.storage.onChanged.addListener(function (changes, areaName) {
+          if (!changes || !changes[DNR_RW_KEY]) return;
+          var store = areaName === "session" ? "session" : areaName === "local" ? "dynamic" : null;
+          if (!store) return;
+          var nv = changes[DNR_RW_KEY].newValue, map = Object.create(null);
+          if (nv && typeof nv === "object") for (var id in nv) map[id] = nv[id];
+          dnrRewritten[store] = map;
+        });
+      }
+    } catch (e) {}
+    // original: the extension's own argument; opts: after the other fixes.
+    var lowerRegexRules = function (store, original, opts) {
+      if (!opts) return opts;
+      var map = dnrRewritten[store], changed = false;
+      var remove = Array.isArray(opts.removeRuleIds) ? opts.removeRuleIds.slice() : [];
+      var removing = Object.create(null);
+      remove.forEach(function (id) { removing[id] = 1; });
+      var forget = function (id) {
+        var e = map[id];
+        if (!e) return;
+        (e.extra || []).forEach(function (x) { if (!removing[x]) { removing[x] = 1; remove.push(x); } });
+        delete map[id]; changed = true;
+      };
+      remove.slice().forEach(forget);
+      var origById = Object.create(null);
+      if (original && Array.isArray(original.addRules)) original.addRules.forEach(function (r) { if (r && r.id != null) origById[r.id] = r; });
+      var used = Object.create(null);
+      for (var mid in map) (map[mid].extra || []).forEach(function (x) { used[x] = 1; });
+      var next = DNR_EXTRA_BASE;
+      var nextId = function () { while (used[next] || origById[next]) next++; used[next] = 1; return next++; };
+      var out = [], lowered = 0, added = 0, refused = 0;
+      (Array.isArray(opts.addRules) ? opts.addRules : []).forEach(function (r) {
+        if (r && r.id != null) forget(r.id);
+        var res;
+        try { res = c2sDnrSafari.lowerRule(r, nextId); } catch (e) { res = { rules: [r], changed: false }; }
+        if (res.error) { refused++; dbg("[c2s] DNR regex (rule " + (r && r.id) + ") has no Safari form: " + res.error); }
+        if (res.changed) { lowered++; added += res.rules.length - 1; }
+        for (var k = 0; k < res.rules.length; k++) out.push(res.rules[k]);
+        var orig = r && r.id != null ? origById[r.id] : null;
+        if (orig && (res.changed || orig !== r)) {
+          map[r.id] = { rule: orig, extra: res.rules.slice(1).map(function (x) { return x.id; }) };
+          changed = true;
+        }
+      });
+      if (changed) dnrRwSave(store);
+      if (lowered || refused) dbg("[c2s] DNR regex: lowered " + lowered + " rule(s) (+" + added + " split), " + refused + " left for Safari to refuse");
+      var removeGrew = remove.length !== (Array.isArray(opts.removeRuleIds) ? opts.removeRuleIds.length : 0);
+      if (!lowered && !removeGrew) return opts;
+      var res2 = Object.assign({}, opts);
+      if (Array.isArray(opts.addRules)) res2.addRules = out;
+      if (remove.length) res2.removeRuleIds = remove;
+      return res2;
+    };
+    // get{Session,Dynamic}Rules: hide the split-off rules and hand back each
+    // rewritten rule as the extension registered it.
+    var wrapGetRules = function (name, store) {
+      var orig = dnrNs[name];
+      if (typeof orig !== "function" || orig.__c2sWrapped) return;
+      var fix = function (rules) {
+        if (!Array.isArray(rules)) return rules;
+        var map = dnrRewritten[store], extra = Object.create(null);
+        for (var id in map) (map[id].extra || []).forEach(function (x) { extra[x] = 1; });
+        var out = [];
+        rules.forEach(function (r) {
+          if (r && extra[r.id]) return;
+          out.push(r && map[r.id] ? map[r.id].rule : r);
+        });
+        return out;
+      };
+      var call = function (filter) {
+        return new Promise(function (resolve, reject) {
+          var done = false;
+          var fin = function (ok, v) { if (!done) { done = true; (ok ? resolve : reject)(v); } };
+          try {
+            var args = filter === undefined ? [] : [filter];
+            args.push(function (rules) {
+              var e = null;
+              try { e = chrome.runtime && chrome.runtime.lastError; } catch (e2) {}
+              if (e) fin(false, e); else fin(true, rules);
+            });
+            var p = orig.apply(dnrNs, args);
+            if (p && typeof p.then === "function") p.then(function (r) { fin(true, r); }, function (e) { fin(false, e); });
+          } catch (e) { fin(false, e); }
+        });
+      };
+      var wrapped = function (filter, cb) {
+        if (typeof filter === "function") { cb = filter; filter = undefined; }
+        var p = dnrRwReady.then(function () { return call(filter); }).then(fix);
+        if (typeof cb !== "function") return p;
+        p.then(function (r) { try { cb(r); } catch (e) {} }, function (e) {
+          setLastErr({ message: String((e && e.message) || e) });
+          try { cb(); } finally { setLastErr(null); }
+        });
+      };
+      if (installOverride(dnrNs, name, wrapped)) wrapped.__c2sWrapped = true;
+    };
+    wrapGetRules("getSessionRules", "session");
+    wrapGetRules("getDynamicRules", "dynamic");
+    // isRegexSupported: Safari's own answer is about the pattern as written; the
+    // lowering above lands patterns it says no to. Answer for what will happen,
+    // so an extension that probes first doesn't skip a rule that would work.
+    (function () {
+      var native = dnrNs.isRegexSupported;
+      if (native && native.__c2sWrapped) return;
+      var ours = function (o) {
+        var re = o && o.regex;
+        if (typeof re !== "string") return { isSupported: false, reason: "syntaxError" };
+        var ok = o.requireCapturing ? !c2sDnrSafari.lowerRegex(re, true).error : c2sDnrSafari.regexSupportable(re);
+        return ok ? { isSupported: true } : { isSupported: false, reason: "syntaxError" };
+      };
+      var irs = function (o, cb) {
+        var p = new Promise(function (resolve) {
+          var mine = ours(o);
+          if (typeof native !== "function") return resolve(mine);
+          var done = false;
+          var fin = function (r) {
+            if (done) return; done = true;
+            resolve(r && r.isSupported ? r : (mine.isSupported ? mine : (r || mine)));
+          };
+          try {
+            var np = native.call(dnrNs, o, function (r) {
+              var e = null;
+              try { e = chrome.runtime && chrome.runtime.lastError; } catch (e2) {}
+              fin(e ? mine : r);
+            });
+            if (np && typeof np.then === "function") np.then(fin, function () { fin(mine); });
+          } catch (e) { fin(mine); }
+        });
+        if (typeof cb !== "function") return p;
+        p.then(function (r) { try { cb(r); } catch (e) {} });
+      };
+      if (installOverride(dnrNs, "isRegexSupported", irs)) irs.__c2sWrapped = true;
+    })();
     var wrapDnrUpdate = function (name) {
       var orig = dnrNs[name];
       if (typeof orig !== "function") { dbg("[c2s] DNR " + name + ": absent, nothing to wrap"); return; }
@@ -6972,6 +7164,15 @@ var __C2S_DEBUG__ = false;
             return { r: r, opts: cur };
           } catch (e) {
             var msg = String((e && e.message) || e);
+            // This Safari still checks header names against WebCore's known list:
+            // switch to the strict check and drop only the refused operations,
+            // rather than the whole rule below.
+            if (!dnrStrictHeaderNames && /The header `[^`]*` is not recognized/.test(msg)) {
+              dnrStrictHeaderNames = true;
+              dbg("[c2s] DNR " + name + ": Safari checks header names against its known list; re-validating strictly");
+              cur = sanitizeHeaders(cur);
+              continue;
+            }
             var m = /rule at index (\d+): Rule with id (-?\d+)/.exec(msg);
             var list = cur && cur.addRules;
             var idx = m ? +m[1] : -1;
@@ -6981,11 +7182,14 @@ var __C2S_DEBUG__ = false;
           }
         }
       };
+      var store = name === "updateSessionRules" ? "session" : "dynamic";
       var wrapped = function (opts, cb) {
+        var original = opts;
         try { dnrNoteHeaderRules(opts); } catch (e) {}
-        try { dnrNoteNavRules(name === "updateSessionRules" ? "session" : "dynamic", opts); } catch (e) {}
-        try { opts = stripModifyHeaders(opts); } catch (e) {}
+        try { dnrNoteNavRules(store, opts); } catch (e) {}
+        try { opts = sanitizeHeaders(opts); } catch (e) {}
         try { opts = stripRefusedTypes(opts); } catch (e) {}
+        try { opts = lowerRegexRules(store, original, opts); } catch (e) { dbg("[c2s] DNR regex lowering failed: " + String((e && e.message) || e)); }
         var addCount = (opts && opts.addRules && opts.addRules.length) || 0;
         var removeCount = (opts && opts.removeRuleIds && opts.removeRuleIds.length) || 0;
         dbg("[c2s] DNR " + name + ": +" + addCount + " -" + removeCount);
@@ -7044,6 +7248,12 @@ var __C2S_DEBUG__ = false;
   // and never redirects. Measured on Safari Technology Preview with all-website access:
   // `url`, `extensionPath` and `regexSubstitution` redirects on a top-level navigation
   // all load the original page, while a `block` rule in the same store blocks it.
+  // That measurement predates declaring declarativeNetRequestWithHostAccess, which
+  // WebKit requires before it activates redirect actions at all; with it, native
+  // redirects (subresources included) are expected to work on granted hosts, and
+  // this emulation is the fallback. If both fire, the tab is pointed at the target
+  // it is already loading, and the target guard below keeps it from looping.
+  // UNVERIFIED on a real Safari: gate this off once native redirects are measured.
   // Alternation in a regexFilter (`\.user\.(?:css|less|styl)`) is refused outright on
   // top of that (D2). Live: Stylus installs a .user.css from any site through exactly
   // such a redirect to its install page, and Tampermonkey does the same for .user.js.
@@ -9083,8 +9293,8 @@ var __C2S_DEBUG__ = false;
   // and a converted extension page is safari-web-extension://<per-install UUID>, which
   // cannot be on that list: the UUID differs per install and the header comes from the
   // site's server. Safari computes the ancestor chain itself, so nothing on this side
-  // reaches the check. Safari's own DNR cannot modify response headers, and a
-  // modifyHeaders rule takes down its whole rule store, so those get stripped anyway.
+  // reaches the check. Safari's own DNR does not reliably modify response headers
+  // (WebKit bug 263818), so a rule rewriting frame-ancestors can't be counted on.
   //
   // The user-visible result is a panel that is simply blank, plus one WebKit console line
   // in a context most people never open. Say so in the frame instead. A blocked frame
