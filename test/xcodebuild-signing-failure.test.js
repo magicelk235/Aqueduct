@@ -79,7 +79,9 @@ for arg in "$@"; do
 done
 echo "attempt team='$team'" >> "$LOG"
 if [ -n "$team" ]; then
+  if [ -n "$ERRMSG" ]; then echo "$ERRMSG"; else
   echo "/tmp/p/App.xcodeproj: error: No Account for Team \\"$team\\". Add a new account in Accounts settings or verify that your accounts have valid credentials. (in target 'App' from project 'App')"
+  fi
   echo "2026-01-01 00:00:00.000 xcodebuild[1:1] [MT] IDERunDestination: Supported platforms for the buildables in the current scheme is empty." >&2
   echo "** BUILD FAILED **" >&2
   exit 65
@@ -91,7 +93,7 @@ exit 0
 `;
 
 /** Run buildXcodeProject against the stub. Returns its result plus what printed. */
-function build({ team, teamAutoDetected }) {
+function build({ team, teamAutoDetected, errmsg }) {
   const dir = mkdtempSync(join(tmpdir(), "viaduct-build-"));
   try {
     const bin = join(dir, "bin");
@@ -109,7 +111,7 @@ function build({ team, teamAutoDetected }) {
          const r = buildXcodeProject("/tmp/p/App.xcodeproj", "App", "macos", ${JSON.stringify(team ?? null)} ?? undefined, ${JSON.stringify({ teamAutoDetected: Boolean(teamAutoDetected) })});
          process.stdout.write(JSON.stringify(r));`,
       ],
-      { encoding: "utf-8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, LOG: log } },
+      { encoding: "utf-8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, LOG: log, ERRMSG: errmsg ?? "" } },
     );
     assert.equal(r.status, 0, r.stderr);
     const result = JSON.parse(r.stdout);
@@ -149,4 +151,24 @@ test("an ad-hoc build is never retried", () => {
   const { result, attempts } = build({});
   assert.equal(result.adHocFallback, undefined);
   assert.deepEqual(attempts, ["attempt team=''"]);
+});
+
+// Issue #19 (Xcode 27): with no Apple account signed in and a revoked certificate
+// still in the keychain, xcodebuild words the failure differently, and the
+// fallback didn't recognise it as a signing problem.
+for (const errmsg of [
+  "/tmp/p/App.xcodeproj: error: No Accounts: Add a new account in Accounts settings. (in target 'App Extension' from project 'App')",
+  `/tmp/p/App.xcodeproj: error: Signing certificate is invalid. Signing certificate "Apple Development: a@b.c (7G4PS9VHV3)", serial number "FD7A", is not valid for code signing. It may have been revoked or expired. (in target 'App Extension' from project 'App')`,
+]) {
+  test(`an auto-detected team falls back to ad-hoc on: ${errmsg.slice(31, 70)}`, () => {
+    const { result, attempts } = build({ team: "W2QY5M77F9", teamAutoDetected: true, errmsg });
+    assert.equal(result?.adHocFallback, true);
+    assert.deepEqual(attempts, ["attempt team='W2QY5M77F9'", "attempt team=''"]);
+  });
+}
+
+test("a named team that cannot sign says how to get a build", () => {
+  const { result, printed } = build({ team: "W2QY5M77F9", errmsg: "/tmp/p/App.xcodeproj: error: No Accounts: Add a new account in Accounts settings." });
+  assert.equal(result, null);
+  assert.match(printed, /--team auto/);
 });

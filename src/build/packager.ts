@@ -1193,7 +1193,7 @@ export function xcodebuildDiagnostics(res: { stdout: string; stderr: string }): 
  *  machine can sign for: no Apple account, no certificate, no profile. These are
  *  recoverable by dropping to ad-hoc; a compile error is not. */
 const SIGNING_FAILURE =
-  /error:.*(No Account for Team|No signing certificate|requires a development team|No profiles for|Failed to (?:register bundle identifier|create provisioning profile)|Provisioning profile .* (?:doesn't|does not) )/;
+  /error:.*(No Accounts?(?: for Team)?:?|No signing certificate|Signing certificate is invalid|requires a development team|No profiles for|Failed to (?:register bundle identifier|create provisioning profile)|Provisioning profile .* (?:doesn't|does not) )/;
 
 export interface XcodeBuildResult {
   builtApp: string;
@@ -1307,7 +1307,17 @@ export function buildXcodeProject(
   // limit. The user asked for "whatever signing you can manage", so finish the
   // conversion ad-hoc instead of throwing the whole run away; the caller adjusts
   // its signing expectation and tells the user about the unsigned toggle.
-  if (!team || !opts.teamAutoDetected || !first.signingFailure) return null;
+  if (!team || !first.signingFailure) return null;
+  if (!opts.teamAutoDetected) {
+    // A team named explicitly is a deliberate request, so don't silently drop to
+    // ad-hoc; say what's wrong and how to get either signature.
+    warn(
+      `Team ${team} cannot sign on this Mac (see the error above).\n` +
+        "  Sign in to Xcode → Settings → Accounts with that team's Apple ID and let Xcode renew its certificate, then re-run.\n" +
+        "  Or re-run with --team auto (falls back to ad-hoc when no team can sign) or without --team for an ad-hoc build.",
+    );
+    return null;
+  }
   warn(
     `Team ${team} cannot sign on this Mac (see the error above). Rebuilding ad-hoc so the conversion still produces an app.\n` +
       "  Ad-hoc extensions need Safari → Develop → \"Allow Unsigned Extensions\" re-ticked after every Safari restart.\n" +
